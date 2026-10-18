@@ -1,0 +1,3 @@
+# Registry backups and test logs come from a real machine; keep them out.
+*.reg
+*.log

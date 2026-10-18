@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Git commit-msg hook. Blocks a message with an AI attribution trailer or private
+# data, using the same patterns as scripts/hygiene.sh.
+set -uo pipefail
+root="$(git rev-parse --show-toplevel)" || exit 1
+bash "${root}/scripts/hygiene.sh" --msg "$1" >/dev/null || {
+  bash "${root}/scripts/hygiene.sh" --msg "$1"
+  echo "commit-msg: blocked. Edit the message; never bypass with --no-verify."
+  exit 1
+}

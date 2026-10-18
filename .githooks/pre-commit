@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Git pre-commit hook (core.hooksPath=.githooks). Blocks the commit if the staged
+# content fails the hygiene gate.
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)" || exit 1
+bash scripts/hygiene.sh --cached >/dev/null || {
+  bash scripts/hygiene.sh --cached
+  echo "pre-commit: blocked. Fix the lines above; never bypass with --no-verify."
+  exit 1
+}
