@@ -5,9 +5,12 @@
 .DESCRIPTION
   Left-click the icon for the panel, right-click for a menu. The panel:
     - shows whether Apoint.exe, the Alps helper, is running. Apoint applies the stick
-      middle-button setting. When it hangs, Windows closes it and middle click stops
-      working until the next sign-in. With "Restart the helper if it stops" on (the
-      default), the tray starts it again and tells you, at most 3 times in 10 minutes.
+      middle-button setting. When it hangs, middle click stops working; Windows may
+      close it later, and then nothing starts it until the next sign-in. With "Restart
+      the helper if it stops" on (the default), the tray restarts it when it is gone
+      or not responding, and tells you, at most 3 times in 10 minutes.
+    - shows the last middle-button press Windows received and which device sent it.
+      No new press when you click means the Alps side is broken, not the browser.
     - switches the stick middle button between middle click and scroll mode
       (Set-StickMiddleButton.ps1, which backs up the Alps key first, here to
       %APPDATA%\AlpsTray\backups).
@@ -19,6 +22,9 @@
   Nothing changes until you click; the work runs in hidden child processes so the
   panel stays responsive. Its own settings are in %APPDATA%\AlpsTray\settings.json
   and errors go to %APPDATA%\AlpsTray\tray.log. Only one copy runs at a time.
+  Notifications use the app ID AlpsTray.PointingStick, registered under
+  HKCU\Software\Classes\AppUserModelId so Windows names them "Alps pointing stick".
+  The Win32 parts are C# in lib\*.cs, compiled when the script starts.
 .PARAMETER Snapshot
   Save a picture of the panel to this .png file and exit. For docs and testing.
 .EXAMPLE
@@ -31,13 +37,10 @@ param([string]$Snapshot)
 $ErrorActionPreference = 'Stop'
 
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-Add-Type @"
-using System; using System.Runtime.InteropServices;
-public static class AlpsTrayNative {
-  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
-  [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr h);
-}
-"@
+# Win32 helpers that PowerShell 5.1 can't call itself live in lib\*.cs, compiled here.
+Add-Type -ReferencedAssemblies System.Windows.Forms -Path @(
+  (Join-Path $PSScriptRoot 'lib\AlpsTrayNative.cs'),
+  (Join-Path $PSScriptRoot 'lib\MiddleWatch.cs'))
 
 $self = $PSCommandPath
 $here = $PSScriptRoot
@@ -77,16 +80,24 @@ function Save-Settings { [pscustomobject]$S | ConvertTo-Json | Set-Content -Enco
 $T = @{
   Started = Get-Date; Tick = 0; Jobs = New-Object System.Collections.ArrayList
   Restarts = New-Object System.Collections.ArrayList; WarnedDown = $false
-  HiddenAt = [datetime]::MinValue; Status = $null
+  HiddenAt = [datetime]::MinValue; Status = $null; HungChecks = 0; Watch = $null
 }
 
 function Get-Status {
   $p = Get-Process Apoint -ErrorAction SilentlyContinue | Select-Object -First 1
   $mode = $null
   try { $mode = (Get-ItemProperty $buttonKey -ErrorAction Stop).SPFunction3 } catch {}
-  $since = $null
-  if ($p) { try { $since = $p.StartTime } catch {} }
-  [pscustomobject]@{ Running = [bool]$p; Since = $since; Mode = $mode }
+  $since = $null; $hung = $false
+  if ($p) {
+    try { $since = $p.StartTime } catch {}
+    $hung = [AlpsTrayNative]::IsHung($p.Id, 500)
+  }
+  [pscustomobject]@{ Running = [bool]$p; Hung = $hung; Since = $since; Mode = $mode }
+}
+function Get-LastPressText {
+  $w = $T.Watch
+  if (-not $w -or -not $w.Count) { return 'no middle press seen since the tray started' }
+  return 'last middle press {0:HH:mm:ss} from {1}' -f $w.Last, $w.LastFrom
 }
 function Get-ModeText($mode) {
   if ($mode -eq 14) { return 'middle click' }
@@ -166,6 +177,8 @@ function Get-LastLine([string]$text) {
 
 function Invoke-RestartHelper([string]$why) {
   $script:why = $why
+  # Evidence for the next diagnosis: did middle presses still reach Windows?
+  Write-Log "restart requested: $(Get-LastPressText)"
   Start-Child 'Restarting the Alps helper' 'Restart-AlpsHelper.ps1' -Done {
     param($code, $text)
     if ($T.Status.Running) {
@@ -219,25 +232,34 @@ function Set-StartWithWindows([bool]$on) {
   Write-Log "start with Windows: $on"
 }
 
-# ---- watchdog: Apoint gone -> restart it (or say so), with a startup grace and a cap
+# ---- watchdog: Apoint gone or hung -> restart it (or say so), with a startup grace and a cap
 
 function Test-Helper {
   $T.Status = Get-Status
-  if ($T.Status.Running) { $T.WarnedDown = $false; return }
-  if ($T.Jobs.Count -or -not (Test-Path $apointExe)) { return }
-  # At sign-in the Alps service starts Apoint itself; give it time.
-  if (((Get-Date) - $T.Started).TotalSeconds -lt 30) { return }
+  $st = $T.Status
+  $problem = $null
+  if ($st.Running) {
+    # Two unanswered pings in a row (about 3 s apart) before calling it hung.
+    if ($st.Hung) { $T.HungChecks++ } else { $T.HungChecks = 0 }
+    if ($T.HungChecks -ge 2) { $problem = 'stopped responding' }
+  } elseif ((Test-Path $apointExe) -and ((Get-Date) - $T.Started).TotalSeconds -ge 30) {
+    # At sign-in the Alps service starts Apoint itself; the 30 s gives it time.
+    $problem = 'stopped'
+  }
+  if (-not $problem) { $T.WarnedDown = $false; return }
+  if ($T.Jobs.Count) { return }
   $cut = (Get-Date).AddMinutes(-10)
   foreach ($r in @($T.Restarts)) { if ($r -lt $cut) { $T.Restarts.Remove($r) } }
   if ($S.AutoRestart -and $T.Restarts.Count -lt 3) {
     [void]$T.Restarts.Add((Get-Date))
-    Write-Log 'Apoint is not running; restarting it'
-    Invoke-RestartHelper 'The Alps helper had stopped, which breaks the stick middle button. It is running again.'
+    $T.HungChecks = 0
+    Write-Log "Apoint $problem; restarting it"
+    Invoke-RestartHelper "The Alps helper had $problem, which breaks the stick middle button. It is running again."
   } elseif (-not $T.WarnedDown) {
     $T.WarnedDown = $true
     $why = 'Auto-restart is off.'
-    if ($S.AutoRestart) { $why = 'It stopped 3 times in 10 minutes, so auto-restart is paused.' }
-    Send-Note Warning "The Alps helper is not running, so the stick middle button won't work. $why"
+    if ($S.AutoRestart) { $why = 'It failed 3 times in 10 minutes, so auto-restart is paused.' }
+    Send-Note Warning "The Alps helper has $problem, so the stick middle button won't work. $why"
   }
 }
 
@@ -267,8 +289,7 @@ $fontHead = New-Object System.Drawing.Font('Segoe UI Semibold', 9)
 $bullet = [string][char]0x25CF
 
 # Tray icon: a dark keycap with the stick's red dot; amber ring and grey dot when the helper is down.
-function New-TrayIcon([bool]$ok) {
-  $sz = [System.Windows.Forms.SystemInformation]::SmallIconSize.Width
+function New-TrayBitmap([bool]$ok, [int]$sz) {
   $bmp = New-Object System.Drawing.Bitmap $sz, $sz
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
@@ -284,6 +305,10 @@ function New-TrayIcon([bool]$ok) {
   $d = $sz * 0.42; $o = ($sz - $d) / 2
   $g.FillEllipse((New-Object System.Drawing.SolidBrush $dot), [single]$o, [single]$o, [single]$d, [single]$d)
   $g.Dispose()
+  return $bmp
+}
+function New-TrayIcon([bool]$ok) {
+  $bmp = New-TrayBitmap $ok ([System.Windows.Forms.SystemInformation]::SmallIconSize.Width)
   $h = $bmp.GetHicon()
   $icon = ([System.Drawing.Icon]::FromHandle($h)).Clone()
   [void][AlpsTrayNative]::DestroyIcon($h); $bmp.Dispose()
@@ -351,6 +376,8 @@ $lblHelper.Margin = New-Object System.Windows.Forms.Padding(0, (Px 2), 0, 0)
 
 $rbClick = New-Choice 'RadioButton' 'Middle click: close tabs, open links, autoscroll'
 $rbScroll = New-Choice 'RadioButton' 'Scroll mode: hold and move (driver default)'
+$lblPress = New-Label '' $fontBody $Pal.Dim
+$lblPress.Margin = New-Object System.Windows.Forms.Padding(0, (Px 4), 0, 0)
 $cbAuto = New-Choice 'CheckBox' 'Restart the helper if it stops'
 $cbStart = New-Choice 'CheckBox' 'Start with Windows'
 
@@ -367,7 +394,7 @@ $lblFoot.Margin = New-Object System.Windows.Forms.Padding(0, (Px 2), 0, (Px 4))
 
 $root.Controls.AddRange(@(
   $lblTitle, $lblHelper,
-  (New-Head 'Middle button'), $rbClick, $rbScroll,
+  (New-Head 'Middle button'), $rbClick, $rbScroll, $lblPress,
   (New-Head 'Helper'), $cbAuto, $cbStart,
   (New-Head 'Tools'), $row1, $row2,
   $lblFoot))
@@ -392,11 +419,37 @@ $miCal = $menu.Items.Add('Recalibrate stick...')
 $miQuit = $menu.Items.Add('Quit')
 $ni.ContextMenuStrip = $menu
 
+# Notifications go out under their own app ID so Windows shows "Alps pointing stick"
+# instead of "Windows PowerShell". The ID is registered per user, with the tray icon.
+$aumid = 'AlpsTray.PointingStick'
+function Register-AppId {
+  $png = Join-Path $dataDir 'icon.png'
+  $bmp = New-TrayBitmap $true 64; $bmp.Save($png, [System.Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
+  $key = "HKCU:\Software\Classes\AppUserModelId\$aumid"
+  if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
+  Set-ItemProperty -Path $key -Name DisplayName -Value 'Alps pointing stick'
+  Set-ItemProperty -Path $key -Name IconUri -Value $png
+  [void][AlpsTrayNative]::SetCurrentProcessExplicitAppUserModelID($aumid)
+}
+function Show-Toast([string]$text) {
+  $null = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]
+  $null = [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]
+  $xml = New-Object Windows.Data.Xml.Dom.XmlDocument
+  $xml.LoadXml(('<toast><visual><binding template="ToastGeneric"><text>{0}</text></binding></visual></toast>' -f
+    [Security.SecurityElement]::Escape($text)))
+  [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($aumid).Show(
+    (New-Object Windows.UI.Notifications.ToastNotification $xml))
+}
+
 function Send-Note {
   param([string]$Kind, [string]$Text, [switch]$Quiet)
   $T.LastNote = '{0:HH:mm}  {1}' -f (Get-Date), $Text
   if (-not $Quiet -and -not $form.Visible) {
-    $ni.ShowBalloonTip(6000, 'Alps pointing stick', $Text, [System.Windows.Forms.ToolTipIcon]::$Kind)
+    try { Show-Toast $Text }
+    catch {
+      Write-Log "toast failed, using a balloon: $($_.Exception.Message)"
+      $ni.ShowBalloonTip(6000, 'Alps pointing stick', $Text, [System.Windows.Forms.ToolTipIcon]::$Kind)
+    }
   }
   Update-Ui
 }
@@ -405,17 +458,22 @@ function Update-Ui {
   $st = $T.Status
   if (-not $st) { return }
   $busy = $T.Jobs.Count -gt 0
-  if ($st.Running) {
+  if ($st.Running -and -not $st.Hung) {
     $since = ''
     if ($st.Since) { $since = ' since {0:ddd HH:mm}' -f $st.Since }
     $lblHelper.Text = "$bullet  Helper (Apoint) running$since"; $lblHelper.ForeColor = $Pal.Ok
     $ni.Icon = $iconOk
   } else {
-    $lblHelper.Text = "$bullet  Helper (Apoint) not running: the middle button won't work"; $lblHelper.ForeColor = $Pal.Warn
+    $state = 'not running'
+    if ($st.Running) { $state = 'not responding' }
+    $lblHelper.Text = "$bullet  Helper (Apoint) $($state): the middle button won't work"; $lblHelper.ForeColor = $Pal.Warn
     $ni.Icon = $iconDown
   }
+  $press = Get-LastPressText
+  $lblPress.Text = $press.Substring(0, 1).ToUpper() + $press.Substring(1) + '. Press it over this panel to test.'
   $tip = 'Alps stick: ' + (Get-ModeText $st.Mode)
   if (-not $st.Running) { $tip += ', helper stopped' }
+  elseif ($st.Hung) { $tip += ', helper not responding' }
   $ni.Text = $tip.Substring(0, [Math]::Min(63, $tip.Length))
   # While a switch runs, keep the choice the user just clicked.
   if (-not $busy) {
@@ -478,7 +536,9 @@ $timer.Add_Tick({
   try {
     Update-Jobs
     $T.Tick++
-    if ($T.Tick % 3 -eq 0) { Test-Helper; if ($form.Visible) { Update-Ui } }
+    if ($T.Tick % 3 -eq 0) { Test-Helper }
+    # Every second while open, so a test press over the panel shows up right away.
+    if ($form.Visible) { Update-Ui }
   } catch { Write-Log "tick: $($_.Exception.Message)" }
 })
 
@@ -498,6 +558,8 @@ if ($Snapshot) {
 }
 
 Write-Log "started (pid $PID)"
+try { Register-AppId } catch { Write-Log "app ID not registered: $($_.Exception.Message)" }
+$T.Watch = New-Object MiddleWatch
 $ni.Visible = $true
 $timer.Start()
 Update-Ui

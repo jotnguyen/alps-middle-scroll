@@ -35,8 +35,13 @@ with `HANDOFF.md`: the current status, the reading order, and the possible follo
 - ASCII only in `.ps1` files. 5.1 reads UTF-8 without a BOM as ANSI.
 - Comment-based help at the top of each script, and `SupportsShouldProcess` on
   anything that writes.
-- Inline C# via `Add-Type` compiles with warnings as errors, so don't hide inherited
-  members (for example `Name` on a `Form`).
+- New C# goes in `scripts/lib/*.cs`, one class per file, loaded with
+  `Add-Type -Path`; don't add inline `Add-Type` C# to a script. Use C# only for what
+  PowerShell can't do (Win32 calls, window messages, hooks) and keep the logic in
+  PowerShell. CI compiles everything in `scripts/lib`. The older scripts still
+  inline theirs; move it out when you next change them.
+- `Add-Type` compiles with warnings as errors, so don't hide inherited members (for
+  example `Name` on a `Form`).
 
 ## Checks
 

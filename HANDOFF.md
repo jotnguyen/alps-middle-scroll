@@ -15,6 +15,7 @@ the Windows 11 26H2 feature update.
 | Fix 2: Firefox DirectManipulation off | **Tried, worked, then rolled back.** Not needed with Fix 1. |
 | Firefox two-finger swipe for back and forward | **Works** with Fix 1 and DirectManipulation on (user-confirmed) |
 | Middle click lost again, 2026-10-27 | **Cause found:** `Apoint.exe` hung and Windows closed it, so nothing applied `SPFunction3` (still 14). Starting Apoint fixed it. `AlpsTray.ps1` now restarts it automatically (tested by stopping Apoint). |
+| Lost a third time, 13:04 the same day | Apoint was still running, with no hang event. Probably hung but not yet closed (unproven). The tray now pings Apoint's windows and restarts a hung one (tested by freezing Apoint: back in 8 s). It also logs the last middle press seen, so the next time will show whether presses reached Windows. |
 | Adversarial review before publishing | Done. The blocker and every should-fix item were fixed before the first commit. |
 
 ## Read in this order
@@ -38,7 +39,8 @@ the Windows 11 26H2 feature update.
 | [scripts/Set-FirefoxDirectManipulation.ps1](scripts/Set-FirefoxDirectManipulation.ps1) | `user.js`, after a `.bak` copy; `-WhatIf` |
 | [scripts/Restart-AlpsHelper.ps1](scripts/Restart-AlpsHelper.ps1) | no files; restarts Apoint; `-WhatIf` |
 | [scripts/Reset-PointingStick.ps1](scripts/Reset-PointingStick.ps1) | no files; restarts the touchpad device (admin); `-WhatIf` |
-| [scripts/AlpsTray.ps1](scripts/AlpsTray.ps1) | only on a click, plus the Apoint watchdog; its own settings and log in `%APPDATA%\AlpsTray` |
+| [scripts/AlpsTray.ps1](scripts/AlpsTray.ps1) | only on a click, plus the Apoint watchdog; its own settings and log in `%APPDATA%\AlpsTray`, its notification app ID under `HKCU\Software\Classes\AppUserModelId` |
+| [scripts/lib/](scripts/lib/) | C# for the tray (hang probe, Raw Input), loaded with `Add-Type -Path`; CI compiles it |
 | [scripts/hygiene.sh](scripts/hygiene.sh) | no; it is the privacy gate run by `.githooks/` and CI |
 
 ## Possible follow-ups
@@ -74,7 +76,9 @@ Ordered roughly by value.
      `/* */` comments.
    - Backups go to `%TEMP%` by default, which Windows can clean. The tray app passes
      `%APPDATA%\AlpsTray\backups` instead.
-   - CI parses the scripts but doesn't compile the `Add-Type` C#.
+   - CI compiles `scripts/lib/*.cs`, but not the C# still inline in
+     `Get-TouchpadReport.ps1` and `Watch-MiddleButton.ps1`. Move it to `scripts/lib`
+     when those scripts next change.
 
 ## Not in the repo, by design
 

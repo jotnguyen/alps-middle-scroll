@@ -125,10 +125,16 @@ Or run the tray app, which does it for you.
 
 `scripts/AlpsTray.ps1` puts an icon in the notification area: a keycap with the
 stick's red dot, which turns grey with an amber ring when the helper is down. It
-watches Apoint and starts it again when it disappears. It does that at most 3 times
-in 10 minutes, then only tells you. Left-click the icon for a panel:
+watches Apoint and restarts it when it disappears or stops responding. A hung
+Apoint can sit there for a long time before Windows closes it, and middle click is
+dead the whole time. The tray restarts it at most 3 times in 10 minutes, then only
+tells you. Its notifications show as "Alps pointing stick". Left-click the icon for a
+panel:
 
-- whether the helper is running
+- whether the helper is running or not responding
+- the last middle-button press Windows received, and from which device. Press the
+  button over the panel: if the time doesn't change, the press isn't reaching
+  Windows (restart the helper); if it does, the problem is in the app
 - the middle button: middle click or scroll mode (Fix 1, backed up to
   `%APPDATA%\AlpsTray\backups`)
 - "Restart the helper if it stops" and "Start with Windows"
@@ -144,7 +150,12 @@ conhost.exe --headless powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -F
 
 Its settings and log are in `%APPDATA%\AlpsTray`. "Start with Windows" puts the
 same command in the `AlpsTray` value under
-`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. Untick it to remove that.
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. Untick it to remove that. The
+notification name comes from `HKCU\Software\Classes\AppUserModelId\AlpsTray.PointingStick`.
+
+The few Win32 calls PowerShell can't make (the hang probe, and Raw Input for the
+last-press display) are C# in `scripts/lib/*.cs`, compiled when the tray starts.
+There is no build step.
 
 ## Docs
 

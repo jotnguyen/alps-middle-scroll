@@ -148,6 +148,34 @@ ShouldProcess before it reads each property, so under `-WhatIf` it returned noth
 read. And PowerShell variable names ignore case: a loop variable `$c` shadowed the
 color table `$C`.
 
+## 11. A third time, without a hang event (2026-10-27, 13:04)
+
+Middle-click to open a link in a new tab stopped working again that afternoon. This
+time Apoint was still running, the tray never saw it disappear, and Windows logged no
+new hang event. Restarting the helper from the tray brought it back, but the user
+said it took a while to start working again. What broke is unproven. The likely
+answer is Apoint hung but not yet closed: Windows logs event 1002 only when it closes
+a hung app itself, and the tray's restart killed it first.
+
+The tray only watched for Apoint disappearing, so it got two additions:
+
+- **A hang check.** The first version used `IsHungAppWindow` on Apoint's (hidden)
+  windows. A test that froze Apoint (`NtSuspendProcess`) showed it never fires.
+  Windows counts a thread that gets no messages as "waiting for input", not hung. The
+  check now sends each Apoint UI thread a `WM_NULL` with `SendMessageTimeout` (500 ms):
+  healthy answered in 34 ms, frozen timed out, and resumed answered in 3 ms. In the
+  tray, a frozen Apoint was restarted 8 s after the freeze.
+- **The last middle press**, from Raw Input with the sending device, shown in the
+  panel and written to the log on every restart. Next time it breaks, that tells
+  whether presses still reached Windows.
+
+The tray's notifications also stopped saying "Windows PowerShell". They now go out as
+WinRT toasts under their own app ID, `AlpsTray.PointingStick`, registered in HKCU with
+a display name and icon.
+
+The C# moved out of the script into `scripts/lib/*.cs`, loaded with `Add-Type -Path`,
+and CI now compiles it.
+
 ## End state on the test machine
 
 | Setting | Value |

@@ -30,5 +30,10 @@ jobs:
       - name: Scripts are ASCII only
         shell: powershell
         run: |
-          $hits = Get-ChildItem scripts\*.ps1 | Select-String -Pattern '[^\x00-\x7F]'
+          $hits = Get-ChildItem scripts\*.ps1, scripts\lib\*.cs | Select-String -Pattern '[^\x00-\x7F]'
           if ($hits) { $hits; exit 1 }
+      - name: Compile the C# in scripts\lib
+        shell: powershell
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -ReferencedAssemblies System.Windows.Forms -Path (Get-ChildItem scripts\lib\*.cs).FullName
