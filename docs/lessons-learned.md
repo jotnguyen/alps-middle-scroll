@@ -42,6 +42,19 @@
 12. **Some vendor processes won't stop.** `ApMsgFwd` survived `Stop-Process`, which was
     fine. Restarting `Apoint` alone applied the new setting.
 
+## Watchdogs
+
+14. **Test a hang check against a frozen process, not a dead one.** `NtSuspendProcess`
+    makes a realistic hang in a second, and `NtResumeProcess` undoes it. It showed that
+    `IsHungAppWindow` never fires for a background helper with hidden windows, with or
+    without a posted message. Only a real round trip worked: `SendMessageCallback`
+    with a deadline.
+15. **A watchdog that restarts things needs a high bar.** Half a second of silence,
+    twice, restarted a healthy but busy Apoint. Give it seconds, not milliseconds,
+    and leave a freshly started process alone for a while.
+16. **Prove the probe can see before trusting "saw nothing".** A zero-distance
+    `SendInput` move confirms a Raw Input listener is alive, without clicking anything.
+
 ## Publishing
 
 13. **Strip identifiers, not just names.** Device instance IDs can carry Bluetooth

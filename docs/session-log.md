@@ -176,10 +176,48 @@ a display name and icon.
 The C# moved out of the script into `scripts/lib/*.cs`, loaded with `Add-Type -Path`,
 and CI now compiles it.
 
+## 12. A fourth time, and a hang check that actually works (2026-10-27, about 14:20)
+
+The user reported middle click to open a new tab broken again. The tray log showed it
+had restarted Apoint for "stopped responding" at 14:19:28 and 14:19:52, then at
+14:24:28. Every entry said "no middle press seen since the tray started" (13:17).
+
+What was checked:
+
+- **The tracker isn't blind.** A zero-distance `SendInput` mouse move reached a
+  `MiddleWatch` instance, so Raw Input works. A middle press from any source,
+  injected ones included, would have been counted. Either the user didn't press the
+  stick middle button between 13:17 and 14:41, or the press never reached the input
+  stack. Not confirmed with the user.
+- **The button test window was opened for the user,** but it was still open when the
+  session ended. Its log (`%TEMP%\middle-button-test.log`) is written on close. Its
+  list box doesn't show up in UI Automation, so it couldn't be read from outside.
+- **Hang check, take 2:** the blocking `SendMessageTimeout` (500 ms, two strikes) was
+  too easy to trip; the 14:19:52 restart came 16 s after the one before. A
+  non-blocking version, `PostMessage(WM_NULL)` then `IsHungAppWindow`, never fired on
+  a frozen Apoint. A thread suspended inside `GetMessage` stays "waiting for input"
+  even with messages queued.
+- **Hang check, take 3:** `SendMessageCallback(WM_NULL)` to one window per Apoint UI
+  thread, with the reply delivered to the tray's message loop. Standalone: 0 s while
+  healthy, unanswered time climbing while frozen, back to 0 within a second of
+  resuming. In the tray, with a 10 s limit and a 20 s grace period for a freshly
+  started Apoint, a frozen Apoint was restarted 17 s after the freeze. This lives in
+  `scripts/lib/HangProbe.cs`.
+- `MiddleWatch` also counts every mouse event (`Events`), which keeps the
+  "is the tracker alive" check one line long.
+
+Also this session: Caps Lock as Alt+Tab went into a separate project,
+`capslock-alttab` next to this repo (AutoHotkey v2). It's a keyboard remap with no
+Alps connection, and a keyboard hook doesn't belong in a PowerShell process. A
+double-tap on the middle button for Alt+Tab was rejected: telling one tap from two
+means delaying every middle click, or letting the first tap close a tab.
+
 ## End state on the test machine
 
 | Setting | Value |
 |---|---|
 | Alps `SPFunction3` | 14 (middle click) |
+| `AlpsTray.ps1` | running, starts at sign-in (HKCU Run value `AlpsTray`), auto-restart on |
+| Last reboot | 2026-10-17; `ApMsgFwd.exe` and `hidfind.exe` have run since then |
 | Firefox `apz.windows.use_direct_manipulation` | true, written by the script into `user.js` |
 | Firefox `apz.windows.force_disable_direct_manipulation` | false, written by the script into `user.js` |

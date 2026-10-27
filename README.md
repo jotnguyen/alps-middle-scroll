@@ -125,7 +125,8 @@ Or run the tray app, which does it for you.
 
 `scripts/AlpsTray.ps1` puts an icon in the notification area: a keycap with the
 stick's red dot, which turns grey with an amber ring when the helper is down. It
-watches Apoint and restarts it when it disappears or stops responding. A hung
+watches Apoint and restarts it when it disappears or stops responding (it doesn't
+answer a ping for 10 s). A hung
 Apoint can sit there for a long time before Windows closes it, and middle click is
 dead the whole time. The tray restarts it at most 3 times in 10 minutes, then only
 tells you. Its notifications show as "Alps pointing stick". Left-click the icon for a

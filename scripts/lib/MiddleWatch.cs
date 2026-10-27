@@ -22,6 +22,9 @@ public class MiddleWatch : NativeWindow {
   public DateTime Last = DateTime.MinValue;
   public string LastFrom = "";
   public int Count;
+  // Every mouse event seen. If this grows while Count doesn't, Raw Input works and the
+  // middle presses really aren't reaching Windows.
+  public long Events;
   readonly Dictionary<IntPtr, string> kinds = new Dictionary<IntPtr, string>();
 
   public MiddleWatch() {
@@ -56,6 +59,7 @@ public class MiddleWatch : NativeWindow {
         if (GetRawInputData(m.LParam, RID_INPUT, buf, ref size, hs) == size) {
           var h = (RIHDR)Marshal.PtrToStructure(buf, typeof(RIHDR));
           var mo = (RIMOUSE)Marshal.PtrToStructure(IntPtr.Add(buf, (int)hs), typeof(RIMOUSE));
+          Events++;
           if ((mo.btnFlags & RI_MOUSE_MIDDLE_BUTTON_DOWN) != 0) { Last = DateTime.Now; LastFrom = Kind(h.dev); Count++; }
         }
       } finally { Marshal.FreeHGlobal(buf); }

@@ -38,9 +38,7 @@ $ErrorActionPreference = 'Stop'
 
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 # Win32 helpers that PowerShell 5.1 can't call itself live in lib\*.cs, compiled here.
-Add-Type -ReferencedAssemblies System.Windows.Forms -Path @(
-  (Join-Path $PSScriptRoot 'lib\AlpsTrayNative.cs'),
-  (Join-Path $PSScriptRoot 'lib\MiddleWatch.cs'))
+Add-Type -ReferencedAssemblies System.Windows.Forms -Path (Get-ChildItem (Join-Path $PSScriptRoot 'lib\*.cs')).FullName
 
 $self = $PSCommandPath
 $here = $PSScriptRoot
@@ -80,7 +78,7 @@ function Save-Settings { [pscustomobject]$S | ConvertTo-Json | Set-Content -Enco
 $T = @{
   Started = Get-Date; Tick = 0; Jobs = New-Object System.Collections.ArrayList
   Restarts = New-Object System.Collections.ArrayList; WarnedDown = $false
-  HiddenAt = [datetime]::MinValue; Status = $null; HungChecks = 0; Watch = $null
+  HiddenAt = [datetime]::MinValue; Status = $null; Watch = $null
 }
 
 function Get-Status {
@@ -90,7 +88,11 @@ function Get-Status {
   $since = $null; $hung = $false
   if ($p) {
     try { $since = $p.StartTime } catch {}
-    $hung = [AlpsTrayNative]::IsHung($p.Id, 500)
+    # A freshly started Apoint is busy initialising; don't judge it for 20 s.
+    # After that, a ping unanswered for 10 s means it has stopped handling messages.
+    if (-not $since -or ((Get-Date) - $since).TotalSeconds -ge 20) {
+      $hung = [HangProbe]::UnansweredSeconds($p.Id) -ge 10
+    }
   }
   [pscustomobject]@{ Running = [bool]$p; Hung = $hung; Since = $since; Mode = $mode }
 }
@@ -239,9 +241,8 @@ function Test-Helper {
   $st = $T.Status
   $problem = $null
   if ($st.Running) {
-    # Two unanswered pings in a row (about 3 s apart) before calling it hung.
-    if ($st.Hung) { $T.HungChecks++ } else { $T.HungChecks = 0 }
-    if ($T.HungChecks -ge 2) { $problem = 'stopped responding' }
+    # The 10 s allowance in Get-Status already absorbs a busy moment.
+    if ($st.Hung) { $problem = 'stopped responding' }
   } elseif ((Test-Path $apointExe) -and ((Get-Date) - $T.Started).TotalSeconds -ge 30) {
     # At sign-in the Alps service starts Apoint itself; the 30 s gives it time.
     $problem = 'stopped'
@@ -252,7 +253,6 @@ function Test-Helper {
   foreach ($r in @($T.Restarts)) { if ($r -lt $cut) { $T.Restarts.Remove($r) } }
   if ($S.AutoRestart -and $T.Restarts.Count -lt 3) {
     [void]$T.Restarts.Add((Get-Date))
-    $T.HungChecks = 0
     Write-Log "Apoint $problem; restarting it"
     Invoke-RestartHelper "The Alps helper had $problem, which breaks the stick middle button. It is running again."
   } elseif (-not $T.WarnedDown) {
