@@ -42,6 +42,9 @@ $current = (Get-ItemProperty $key).SPFunction3
 Write-Output "SPFunction3 is $current; target $value ($Mode)."
 if ($current -eq $value) {
   Write-Output 'Already set. Nothing to do. (If an earlier run used -NoRestart, sign out and back in.)'
+  if (-not (Get-Process Apoint -ErrorAction SilentlyContinue)) {
+    Write-Warning 'The Alps helper (Apoint) is not running, so the setting is not applied. Run Restart-AlpsHelper.ps1.'
+  }
   return
 }
 
@@ -60,18 +63,4 @@ if ($NoRestart) {
   return
 }
 if (-not (Test-Path $apoint)) { Write-Warning "Apoint.exe not found at $apoint; sign out and back in to apply."; return }
-if ($PSCmdlet.ShouldProcess('Apoint, ApntEx, ApMsgFwd, ApRemote', 'restart the Alps helper processes')) {
-  $oldIds = @(Get-Process Apoint -ErrorAction SilentlyContinue | ForEach-Object Id)
-  # ApMsgFwd may refuse to stop (it can run elevated); Apoint restarting is what matters.
-  Get-Process Apoint, ApntEx, ApMsgFwd, ApRemote -ErrorAction SilentlyContinue |
-    Stop-Process -Force -ErrorAction SilentlyContinue
-  Start-Sleep -Seconds 2
-  if (Get-Process Apoint -ErrorAction SilentlyContinue | Where-Object { $oldIds -contains $_.Id }) {
-    Write-Warning 'Apoint would not stop (it may run elevated); sign out and back in to apply.'
-    return
-  }
-  Start-Process $apoint
-  Start-Sleep -Seconds 4
-  if (Get-Process Apoint -ErrorAction SilentlyContinue) { Write-Output 'Alps helper restarted.' }
-  else { Write-Warning 'Apoint did not come back; sign out and back in.' }
-}
+& (Join-Path $PSScriptRoot 'Restart-AlpsHelper.ps1')

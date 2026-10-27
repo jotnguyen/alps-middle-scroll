@@ -97,6 +97,9 @@ Firefox has already copied the values into `prefs.js`.
 | `scripts/Watch-MiddleButton.ps1` | Opens a test window: Raw Input logs buttons and wheel per device, and the app-level hook logs middle and wheel messages | No |
 | `scripts/Set-StickMiddleButton.ps1` | Fix 1 (supports `-WhatIf`) | Yes, with a `.reg` backup first |
 | `scripts/Set-FirefoxDirectManipulation.ps1` | Fix 2, or its undo (supports `-WhatIf`) | Yes, only its own prefs in `user.js`, with a `.bak` copy |
+| `scripts/Restart-AlpsHelper.ps1` | Starts or restarts Apoint, the Alps helper (supports `-WhatIf`) | Restarts processes only |
+| `scripts/Reset-PointingStick.ps1` | Restarts the touchpad device so a drifting stick recalibrates. Needs admin (supports `-WhatIf`) | Restarts the device only |
+| `scripts/AlpsTray.ps1` | The tray app (below) | Only when you click, plus restarting Apoint |
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\Watch-MiddleButton.ps1
@@ -104,6 +107,44 @@ powershell -ExecutionPolicy Bypass -File .\scripts\Watch-MiddleButton.ps1
 
 The report and the test-window log trim device instance IDs and Bluetooth
 addresses, but read them before you share them.
+
+## If middle click stops working again
+
+The middle-click setting is applied by `Apoint.exe`, the Alps helper. If Apoint
+hangs, Windows closes it (Application log, event 1002) and nothing starts it again
+until you sign in. The stick middle button then does nothing in browsers, even
+though `SPFunction3` is still 14. Start the helper again:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\Restart-AlpsHelper.ps1
+```
+
+Or run the tray app, which does it for you.
+
+## Tray app
+
+`scripts/AlpsTray.ps1` puts an icon in the notification area: a keycap with the
+stick's red dot, which turns grey with an amber ring when the helper is down. It
+watches Apoint and starts it again when it disappears. It does that at most 3 times
+in 10 minutes, then only tells you. Left-click the icon for a panel:
+
+- whether the helper is running
+- the middle button: middle click or scroll mode (Fix 1, backed up to
+  `%APPDATA%\AlpsTray\backups`)
+- "Restart the helper if it stops" and "Start with Windows"
+- **Restart helper**, **Recalibrate stick** (restarts the touchpad device after a
+  UAC prompt, for a drifting stick), **Button test** (the test window above), and
+  **Report** (opened in Notepad)
+
+Start it with no console window:
+
+```powershell
+conhost.exe --headless powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\scripts\AlpsTray.ps1
+```
+
+Its settings and log are in `%APPDATA%\AlpsTray`. "Start with Windows" puts the
+same command in the `AlpsTray` value under
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. Untick it to remove that.
 
 ## Docs
 

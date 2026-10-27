@@ -119,6 +119,35 @@ After a Firefox restart, the user confirmed that **both gestures work**:
 So Fix 1 alone is enough, and the end state keeps DirectManipulation on. Nobody tested
 whether the swipe gesture worked while Fix 2 was in place.
 
+## 10. Middle click stopped again (2026-10-27)
+
+Nine days later, middle-click to close a tab stopped working again. `SPFunction3` was
+still 14. What had changed: `Apoint.exe` wasn't running. That morning the Application
+log had an Application Hang event (1002), where Windows reported that Apoint stopped
+responding and was closed, and a matching Windows Error Reporting `AppHangB1` event.
+Nothing starts Apoint again until the next sign-in, and without it the setting isn't
+applied. Starting `Apoint.exe` brought `ApntEx` and `ApRemote` back with it.
+
+Why Apoint hung is unknown. The same day the user also reported the stick drifting
+toward the top left. Nothing links the two.
+
+Three scripts came out of it:
+
+- `scripts/Restart-AlpsHelper.ps1`: the restart logic, pulled out of
+  `Set-StickMiddleButton.ps1`, which now calls it.
+- `scripts/Reset-PointingStick.ps1`: restarts the touchpad device
+  (`pnputil /restart-device` on the parent of the "Dell Touchpad" collection) so a
+  drifting stick recalibrates.
+- `scripts/AlpsTray.ps1`: a tray app that restarts Apoint when it disappears and puts
+  the other scripts behind buttons. Tested by stopping Apoint: the tray logged it, and
+  Apoint was back as soon as the tray's 30-second startup grace period ended.
+
+Testing caught two `-WhatIf` traps. `ForEach-Object Id` (the member-name form) asks
+ShouldProcess before it reads each property, so under `-WhatIf` it returned nothing.
+`Get-PnpDeviceProperty` also honors `-WhatIf`, so it needs `-WhatIf:$false` for a
+read. And PowerShell variable names ignore case: a loop variable `$c` shadowed the
+color table `$C`.
+
 ## End state on the test machine
 
 | Setting | Value |

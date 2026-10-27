@@ -102,6 +102,11 @@ an interaction between that driver and the new Windows build can't be ruled out.
 `SPFunction3 = 16`). `Apoint` reads the settings at start, so restart it after a change.
 Alps doesn't document these codes.
 
+The setting holds only while `Apoint` runs. On 2026-10-27 Apoint hung and Windows
+closed it (observed: Application Hang event 1002). With `SPFunction3` still 14, the
+stick middle button stopped closing tabs until Apoint was started again (observed).
+`ApMsgFwd` and `hidfind` kept running the whole time, so they don't apply the setting.
+
 ### Windows: `HKCU\Software\Microsoft\Windows\CurrentVersion\PrecisionTouchPad`
 
 Build 26300 has values that older builds don't: `SingleFingerPanMode` (single-finger
